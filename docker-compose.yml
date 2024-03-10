@@ -1,0 +1,16 @@
+version: "3.7"
+
+services:
+  simple-pubsub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    volumes:
+      - ./src:/app/src
+    container_name: simple-pubsub
+    expose:
+      - "4000"
+    ports:
+      - "4000:4000"
+    command: npm start
