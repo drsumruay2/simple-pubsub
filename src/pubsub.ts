@@ -91,8 +91,10 @@ export class MachineSaleSubscriber implements ISubscriber {
   }
 
   handle(event: MachineSaleEvent): void {
-    const machine = this.machineRepository.getById(event.machineId());
-    if (machine) {
+    const machine = this.machineRepository
+      .getById(event.machineId())
+      .getOrElse(null);
+    if (machine !== null) {
       machine.stockLevel -= event.getSoldQuantity();
       console.log(
         `Sold '${event.getSoldQuantity()}' from machine '${event.machineId()}' stock level is now '${
@@ -104,6 +106,8 @@ export class MachineSaleSubscriber implements ISubscriber {
       } else {
         //this.pubSubService.publish(new StockLevelOkEvent(event.machineId()));
       }
+    } else {
+      console.log(`No subscriber for Machine ${event.machineId()}`);
     }
   }
 }
@@ -121,8 +125,10 @@ export class MachineRefillSubscriber implements ISubscriber {
 
   handle(event: MachineRefillEvent): void {
     // Increase the stock quantity of the machine
-    const machine = this.machineRepository.getById(event.machineId());
-    if (machine) {
+    const machine = this.machineRepository
+      .getById(event.machineId())
+      .getOrElse(null);
+    if (machine !== null) {
       machine.stockLevel += event.getRefillQuantity();
       console.log(
         `Refilled Machine ${event.machineId()} stock for '${event.getRefillQuantity()}' level is now '${
@@ -133,6 +139,8 @@ export class MachineRefillSubscriber implements ISubscriber {
       if (machine.stockLevel >= 3) {
         this.pubSubService.publish(new StockLevelOkEvent(event.machineId()));
       }
+    } else {
+      console.log(`No subscriber for Machine ${event.machineId()}`);
     }
   }
 }
@@ -165,9 +173,11 @@ export class Repository<T> {
     return this.entities;
   }
 
-  getById(id: string): T | undefined {
-    return this.entities.find(
-      (entity: any) => (entity as { id: string }).id === id
+  getById(id: string): Maybe<T | null> {
+    return Maybe.some(
+      this.entities.find(
+        (entity: any) => (entity as { id: string }).id === id
+      ) || null
     );
   }
 
@@ -191,6 +201,38 @@ export class Repository<T> {
     );
   }
 }
+// Maybe Monad
+class Maybe<T> {
+  private readonly value: T | null;
+
+  private constructor(value: T | null) {
+    this.value = value;
+  }
+
+  static some<T>(value: T) {
+    return new Maybe(value);
+  }
+
+  static nothing<T>(): Maybe<T> {
+    return new Maybe<T>(null);
+  }
+
+  map<U>(transform: (value: T) => U): Maybe<U> {
+    return this.value !== null
+      ? Maybe.some(transform(this.value))
+      : Maybe.nothing<U>();
+  }
+
+  flatMap<U>(transform: (value: T) => Maybe<U>): Maybe<U> {
+    return this.value !== null ? transform(this.value) : Maybe.nothing<U>();
+  }
+
+  getOrElse<U>(defaultValue: U): T | U {
+    return this.value !== null && this.value !== undefined
+      ? this.value
+      : defaultValue;
+  }
+}
 export class PubSubService implements IPublishSubscribeService {
   private subscribers: Record<string, ISubscriber[]>;
 
@@ -202,9 +244,15 @@ export class PubSubService implements IPublishSubscribeService {
     const eventType = event.type();
     const eventSubscribers = this.subscribers[eventType] || [];
 
-    for (const subscriber of eventSubscribers) {
-      subscriber.handle(event);
-    }
+    Maybe.some(eventSubscribers)
+      .map((subscribers) => {
+        for (const subscriber of subscribers) {
+          subscriber.handle(event);
+        }
+      })
+      .getOrElse(() =>
+        console.log(`No subscribers for event type '${eventType}'`)
+      );
   }
 
   subscribe(type: string, handler: ISubscriber): void {
