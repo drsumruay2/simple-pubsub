@@ -1,3 +1,5 @@
+import { STOCK_THRESHOLD, INITIAL_STOCK_LEVEL } from "./constants";
+
 // interfaces
 export interface IEvent {
   type(): string;
@@ -101,13 +103,15 @@ export class MachineSaleSubscriber implements ISubscriber {
           machine.stockLevel
         }'`
       );
-      if (machine.stockLevel < 3) {
+      if (machine.stockLevel < STOCK_THRESHOLD && !machine.hasLowStockWarning) {
         this.pubSubService.publish(new LowStockWarningEvent(event.machineId()));
       } else {
         //this.pubSubService.publish(new StockLevelOkEvent(event.machineId()));
       }
     } else {
-      console.log(`No subscriber for Machine ${event.machineId()}`);
+      console.log(
+        `No ${event.type()} subscriber for Machine ${event.machineId()}`
+      );
     }
   }
 }
@@ -135,32 +139,68 @@ export class MachineRefillSubscriber implements ISubscriber {
           machine.stockLevel
         }'`
       );
-      // Check if the stock level is now 3 or above to generate StockLevelOkEvent
-      if (machine.stockLevel >= 3) {
+      // Check if the stock level is now equal or above threshold to generate StockLevelOkEvent
+      if (machine.stockLevel >= STOCK_THRESHOLD && machine.hasLowStockWarning) {
+        this.removeLowStockWarning(machine);
         this.pubSubService.publish(new StockLevelOkEvent(event.machineId()));
       }
     } else {
       console.log(`No subscriber for Machine ${event.machineId()}`);
     }
   }
+  private removeLowStockWarning(machine: Machine): void {
+    if (machine.hasLowStockWarning) {
+      machine.hasLowStockWarning = false;
+    }
+  }
 }
-
 export class StockWarningSubscriber implements ISubscriber {
-  private lowStockWarningReceived: Set<string> = new Set();
+  public machineRepository: Repository<Machine>;
+  constructor(machineRepository: Repository<Machine>) {
+    this.machineRepository = machineRepository;
+  }
 
   handle(event: LowStockWarningEvent): void {
     // Check if the warning event has already been received for this machine
-    if (!this.lowStockWarningReceived.has(event.machineId())) {
-      console.log(`Low stock warning for machine ${event.machineId()}`);
-      this.lowStockWarningReceived.add(event.machineId());
+    const machineId = event.machineId();
+    const machine = this.machineRepository.getById(machineId).getOrElse(null);
+
+    if (machine != null) {
+      console.log(`Low stock warning for machine ${machineId}`);
+      machine.hasLowStockWarning = true;
+      this.machineRepository.update(machine);
+    } else {
+      console.log(
+        `No ${event.type()} subscriber for Machine ${event.machineId()}`
+      );
+    }
+  }
+}
+export class StockLevelOkSubscriber implements ISubscriber {
+  public machineRepository: Repository<Machine>;
+
+  constructor(machineRepository: Repository<Machine>) {
+    this.machineRepository = machineRepository;
+  }
+
+  handle(event: StockLevelOkEvent): void {
+    const machineId = event.machineId();
+    const machine = this.machineRepository.getById(machineId).getOrElse(null);
+
+    if (machine !== null) {
+      console.log(`Stock level is okay for machine ${machineId}`);
+      machine.hasLowStockWarning = false;
+      this.machineRepository.update(machine);
+    } else {
+      console.log(`No subscriber for Machine ${machineId}`);
     }
   }
 }
 // objects
 export class Machine {
-  public stockLevel = 5;
+  public stockLevel = INITIAL_STOCK_LEVEL;
   public id: string;
-
+  public hasLowStockWarning: boolean = false; // Add a new field to track if the machine has a low stock warning
   constructor(id: string) {
     this.id = id;
   }
@@ -244,15 +284,13 @@ export class PubSubService implements IPublishSubscribeService {
     const eventType = event.type();
     const eventSubscribers = this.subscribers[eventType] || [];
 
-    Maybe.some(eventSubscribers)
-      .map((subscribers) => {
-        for (const subscriber of subscribers) {
-          subscriber.handle(event);
-        }
-      })
-      .getOrElse(() =>
-        console.log(`No subscribers for event type '${eventType}'`)
-      );
+    if (eventSubscribers.length > 0) {
+      for (const subscriber of eventSubscribers) {
+        subscriber.handle(event);
+      }
+    } else {
+      console.log(`No subscribers for event type '${eventType}'`);
+    }
   }
 
   subscribe(type: string, handler: ISubscriber): void {

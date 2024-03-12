@@ -5,14 +5,13 @@ import {
   IEvent,
   MachineSaleEvent,
   MachineRefillEvent,
-  LowStockWarningEvent,
-  StockLevelOkEvent,
   Machine,
   Repository,
   MachineSaleSubscriber,
   MachineRefillSubscriber,
   StockWarningSubscriber,
   PubSubService,
+  StockLevelOkSubscriber,
 } from "./pubsub";
 
 export const runSimulation = async () => {
@@ -21,9 +20,21 @@ export const runSimulation = async () => {
 
   // create machine repository with 3 machines
   const machineRepository = new Repository<Machine>();
-  const machine1: Machine = { id: "001", stockLevel: 3 };
-  const machine2: Machine = { id: "002", stockLevel: 5 };
-  const machine3: Machine = { id: "003", stockLevel: 1 };
+  const machine1: Machine = {
+    id: "001",
+    stockLevel: 3,
+    hasLowStockWarning: false,
+  };
+  const machine2: Machine = {
+    id: "002",
+    stockLevel: 3,
+    hasLowStockWarning: false,
+  };
+  const machine3: Machine = {
+    id: "003",
+    stockLevel: 3,
+    hasLowStockWarning: false,
+  };
   machineRepository.add(machine1);
   machineRepository.add(machine2);
   machineRepository.add(machine3);
@@ -45,7 +56,10 @@ export const runSimulation = async () => {
   );
 
   // create a low stock warning event subscriber
-  const stockWarningSubscriber = new StockWarningSubscriber();
+  const stockWarningSubscriber = new StockWarningSubscriber(machineRepository);
+
+  // create a stock level ok event subscriber
+  const stockLevelOkSubscriber = new StockLevelOkSubscriber(machineRepository);
 
   // subscribe the saleSubscriber to the 'sale' type events
   pubSubService.subscribe("sale", saleSubscriber);
@@ -55,6 +69,9 @@ export const runSimulation = async () => {
 
   // subscribe the stockWarningSubscriber to the 'lowStockWarning' type events
   pubSubService.subscribe("lowStockWarning", stockWarningSubscriber);
+
+  // subscribe the stockWarningSubscriber to the 'lowStockWarning' type events
+  pubSubService.subscribe("stockLevelOk", stockLevelOkSubscriber);
 
   // create 5 random events
   const events = [1, 2, 3, 4, 5].map((i) => eventGenerator());
